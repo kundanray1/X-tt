@@ -54,6 +54,13 @@ export default class GameLobby extends Component {
 			}
 		}.bind(this))
 
+		this.socket.on('room_closed', function(data) {
+			var rooms = this.state.rooms.filter(function(r) { 
+				return r.roomId !== data.roomId 
+			})
+			this.setState({ rooms: rooms })
+		}.bind(this))
+
 		this.socket.on('disconnect', function() {
 			this.setState({ connected: false })
 		}.bind(this))
