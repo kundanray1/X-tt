@@ -13,6 +13,12 @@ Player = require("./Player").Player;			// Player class
 players = [];									// Array of connected players
 players_avail = [];
 
+/**************************************************
+** SPECTATOR SYSTEM
+**************************************************/
+var SpectatorModule = require("./SpectatorManager");
+spectatorManager = new SpectatorModule.SpectatorManager();
+
 
 var port = process.env.PORT || 3001;
 
