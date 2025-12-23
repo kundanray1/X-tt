@@ -7,6 +7,7 @@ import TweenMax from 'gsap'
 import rand_arr_elem from '../../helpers/rand_arr_elem'
 import rand_to_fro from '../../helpers/rand_to_fro'
 import GameBoard from './GameBoard'
+import { getReactionEmoji, normalizeReactionType } from './reactions'
 import reactionSound from '../../../static/sounds/move-self.mp3'
 import victorySound from '../../../static/sounds/victory-1-90174.mp3'
 import defeatSound from '../../../static/sounds/defeat.mp3'
@@ -40,26 +41,15 @@ export default class GameMain extends Component {
 
 		this.sock_start()
 
-		if (this.props.game_type != 'live')
-			this.state = {
-				cell_vals: {},
-				next_turn_ply: true,
-				game_play: true,
-				game_stat: 'Start game',
-				spectatorReactions: [],
-				winCells: [],
-				soundEnabled: false
-			}
-		else {
-			this.state = {
-				cell_vals: {},
-				next_turn_ply: true,
-				game_play: false,
-				game_stat: 'Connecting',
-				spectatorReactions: [],
-				winCells: [],
-				soundEnabled: false
-			}
+		var isLive = this.props.game_type == 'live'
+		this.state = {
+			cell_vals: {},
+			next_turn_ply: true,
+			game_play: !isLive,
+			game_stat: isLive ? 'Connecting' : 'Start game',
+			spectatorReactions: [],
+			winCells: [],
+			soundEnabled: false
 		}
 	}
 
@@ -131,22 +121,24 @@ export default class GameMain extends Component {
 		// console.log(cell_vals)
 
 		return (
-			<div id='GameMain'>
-
-				{!this.state.soundEnabled && (
-					<div className="sound-opt">
-						<button type="button" className="button" onClick={this.enableSound.bind(this)}>Enable sound</button>
-					</div>
-				)}
-
-				<h1>Play {this.props.game_type}</h1>
+			<div id='GameMain' className="ttt-shell game-shell">
+				<div className="game-header">
+					<h1>Play {this.props.game_type}</h1>
+					<button
+						type="button"
+						className="button ghost sound-btn"
+						onClick={this.toggleSound.bind(this)}
+					>
+						{this.state.soundEnabled ? 'Disable sound' : 'Enable sound'}
+					</button>
+				</div>
 
 				<div id="game_stat">
 					<div id="game_stat_msg">{this.state.game_stat}</div>
 					{this.state.game_play && <div id="game_turn_msg">{this.state.next_turn_ply ? 'Your turn' : 'Opponent turn'}</div>}
 				</div>
 
-				<div id="game_board" className="has-reactions">
+				<div id="game_board" className="has-reactions board-frame">
 					<GameBoard 
 						ref={function(ref) { this.boardRef = ref }.bind(this)}
 						cellVals={cell_vals} 
@@ -204,20 +196,11 @@ export default class GameMain extends Component {
 //	------------------------	------------------------	------------------------
 
 	turn_ply_comp (cell_id) {
-
-		let { cell_vals } = this.state
-
-		cell_vals[cell_id] = 'x'
-
-		this.boardRef && this.boardRef.animateCell(cell_id)
-
-		this.emitSpectatorTurn(cell_id, this.socket && this.socket.id, app.settings.curr_user.name);
-
-		this.state.cell_vals = cell_vals
-
-		this.check_turn()
-
-		this.playMoveSound()
+		this.applyMove(cell_id, 'x', {
+			emitSpectator: true,
+			playerId: this.socket && this.socket.id,
+			playerName: app.settings.curr_user.name
+		})
 	}
 
 //	------------------------	------------------------	------------------------
@@ -233,23 +216,11 @@ export default class GameMain extends Component {
 		// console.log(cell_vals, empty_cells_arr, rand_arr_elem(empty_cells_arr))
 
 		const c = rand_arr_elem(empty_cells_arr)
-		cell_vals[c] = 'o'
-
-		this.boardRef && this.boardRef.animateCell(c)
-
-		this.emitSpectatorTurn(c, 'computer', 'Computer');
-
-
-		// this.setState({
-		// 	cell_vals: cell_vals,
-		// 	next_turn_ply: true
-		// })
-
-		this.state.cell_vals = cell_vals
-
-		this.check_turn()
-
-		this.playMoveSound()
+		this.applyMove(c, 'o', {
+			emitSpectator: true,
+			playerId: 'computer',
+			playerName: 'Computer'
+		})
 	}
 
 
@@ -257,45 +228,30 @@ export default class GameMain extends Component {
 //	------------------------	------------------------	------------------------
 
 	turn_ply_live (cell_id) {
-
-		let { cell_vals } = this.state
-
-		cell_vals[cell_id] = 'x'
-
-		this.boardRef && this.boardRef.animateCell(cell_id)
-
-		this.socket.emit('ply_turn', { cell_id: cell_id });
-
-		// this.setState({
-		// 	cell_vals: cell_vals,
-		// 	next_turn_ply: false
-		// })
-
-		// setTimeout(this.turn_comp.bind(this), rand_to_fro(500, 1000));
-
-		this.state.cell_vals = cell_vals
-
-		this.check_turn()
-
-		this.playMoveSound()
+		this.applyMove(cell_id, 'x', { emitTurn: true })
 	}
 
 //	------------------------	------------------------	------------------------
 
 	turn_opp_live (data) {
+		this.applyMove(data.cell_id, 'o')
+	}
 
+//	------------------------	------------------------	------------------------
+
+	applyMove (cell_id, mark, options) {
 		let { cell_vals } = this.state
+		cell_vals[cell_id] = mark
 
-		const c = data.cell_id
-		cell_vals[c] = 'o'
+		this.boardRef && this.boardRef.animateCell(cell_id)
 
-		this.boardRef && this.boardRef.animateCell(c)
+		if (options && options.emitSpectator) {
+			this.emitSpectatorTurn(cell_id, options.playerId, options.playerName)
+		}
 
-
-		// this.setState({
-		// 	cell_vals: cell_vals,
-		// 	next_turn_ply: true
-		// })
+		if (options && options.emitTurn) {
+			this.socket && this.socket.emit('ply_turn', { cell_id: cell_id })
+		}
 
 		this.state.cell_vals = cell_vals
 
@@ -386,82 +342,78 @@ export default class GameMain extends Component {
 		this.socket.emit('game:turn:spectator', payload)
 	}
 
-	enableSound () {
-		try {
-			var testAudio = this.reactionAudio || new Audio(reactionSound)
-			this.reactionAudio = testAudio
-			testAudio.currentTime = 0
-			testAudio.play()
-			this.setState({ soundEnabled: true })
-		} catch (e) {
-			this.setState({ soundEnabled: true })
+	toggleSound () {
+		if (this.state.soundEnabled) {
+			this.disableSound()
+		} else {
+			this.enableSound()
 		}
 	}
 
-	playMoveSound () {
-		if (!this.state.soundEnabled) return
+	enableSound () {
+		this.playSound(reactionSound, 'moveAudio', true)
+		this.setState({ soundEnabled: true })
+	}
+
+	disableSound () {
+		this.setState({ soundEnabled: false })
+		;['moveAudio', 'victoryAudio', 'defeatAudio'].forEach(function(key) {
+			if (this[key]) {
+				try {
+					this[key].pause()
+					this[key].currentTime = 0
+				} catch (e) {}
+			}
+		}.bind(this))
+	}
+
+	playSound (src, cacheKey, force) {
+		if (!force && !this.state.soundEnabled) return
+		if (!src) return
 		try {
-			var audio = this.reactionAudio || new Audio(reactionSound)
-			this.reactionAudio = audio
+			var audio = cacheKey ? (this[cacheKey] || new Audio(src)) : new Audio(src)
+			if (cacheKey) this[cacheKey] = audio
 			audio.currentTime = 0
 			audio.play()
 		} catch (e) {}
+	}
+
+	playMoveSound () {
+		this.playSound(reactionSound, 'moveAudio')
 	}
 
 	playVictorySound () {
-		if (!this.state.soundEnabled) return
-		try {
-			var audio = this.victoryAudio || new Audio(victorySound)
-			this.victoryAudio = audio
-			audio.currentTime = 0
-			audio.play()
-		} catch (e) {}
+		this.playSound(victorySound, 'victoryAudio')
 	}
 
 	playDefeatSound () {
-		if (!this.state.soundEnabled) return
-		try {
-			var audio = this.defeatAudio || new Audio(defeatSound)
-			this.defeatAudio = audio
-			audio.currentTime = 0
-			audio.play()
-		} catch (e) {}
+		this.playSound(defeatSound, 'defeatAudio')
 	}
 
 	playReactionSound (type) {
 		if (!this.state.soundEnabled) return
+		var normalized = normalizeReactionType(type)
 		var soundMap = {
 			laugh: hahaSound,
 			love: loveSound,
 			whisper: whisperSound,
 			lightning: lighteningSound
 		}
-		var src = soundMap[type] || reactionSound
-		try {
-			var audio = new Audio(src)
-			audio.currentTime = 0
-			audio.play()
-		} catch (e) {}
+		var src = soundMap[normalized] || reactionSound
+		this.playSound(src)
 	}
 
 	onSpectatorDisturb (data) {
-		var emojiMap = {
-			laugh: '😂',
-			love: '❤️',
-			lightning: '⚡',
-			whisper: '🤫',
-			nudge: '⚡',
-			default: '✨'
-		}
-		var baseEmoji = emojiMap[data.type] || emojiMap.default
+		var reactionType = normalizeReactionType(data.type)
+		var baseEmoji = getReactionEmoji(reactionType)
 		var name = data.from || 'Spectator'
-		this.playReactionSound(data.type)
+		this.playReactionSound(reactionType)
 
 		var particles = []
 		for (var i = 0; i < 10; i++) {
 			particles.push({
 				id: Date.now() + Math.random(),
-				type: data.type || 'reaction',
+				type: reactionType || 'reaction',
 				from: name,
 				emoji: baseEmoji,
 				offset: Math.max(5, Math.min(90, Math.round(Math.random() * 100))),

@@ -12,7 +12,7 @@ constructor (props) {
 
 	render () {
 		return (
-			<div id='SetName'>
+			<div id='SetName' className="ttt-shell set-name">
 
 				<h1>Set Name</h1>
 

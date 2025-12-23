@@ -39,14 +39,14 @@ export default class Ttt extends Component {
 					)}
 
 					{mode === 'set_game_type' && hasName && (
-						<div>
+						<div className="ttt-flow">
 							<h2>Welcome, {app.settings.curr_user.name}</h2>
 							<SetGameType onSetType={this.handleSetGameType.bind(this)} />
 						</div>
 					)}
 
 					{mode === 'playing' && hasName && (
-						<div>
+						<div className="ttt-flow">
 							<h2>Welcome, {app.settings.curr_user.name}</h2>
 							<GameMain
 								game_type={this.state.game_type}

@@ -1,6 +1,41 @@
 import React, { Component } from 'react'
 import io from 'socket.io-client'
 import GameBoard from './GameBoard'
+import { REACTION_ITEMS } from './reactions'
+
+function SpectatorHeader(props) {
+	return (
+		<div className="spectator-header">
+			<div className="spectator-title">
+				<h2>{props.status}</h2>
+			</div>
+			<button type="button" onClick={props.onLeave} className="button ghost leave-btn">
+				Leave
+			</button>
+		</div>
+	)
+}
+
+function ReactionDock(props) {
+	if (props.hidden) return null
+	return (
+		<div className="floating-reactions" aria-label="Reactions">
+			{props.items.map(function(item) {
+				return (
+					<button
+						key={item.type}
+						type="button"
+						aria-label={item.label}
+						onClick={function() { props.onReact(item.type) }}
+						className="reaction-icon"
+					>
+						{item.emoji}
+					</button>
+				)
+			})}
+		</div>
+	)
+}
 
 export default class SpectatorView extends Component {
 
@@ -94,27 +129,18 @@ export default class SpectatorView extends Component {
 		var gameEnded = this.state.gameEnded
 
 		return (
-			<div id="SpectatorView">
-				<div className="spectator-header">
-					<h2>{this.state.gameStatus}</h2>
-				</div>
+			<div id="SpectatorView" className="ttt-shell spectator-shell">
+				<SpectatorHeader status={this.state.gameStatus} onLeave={this.props.onLeave} />
 
-				<div className="board-area" id="game_board">
+				<div className="board-area board-frame" id="game_board">
 					<GameBoard cellVals={this.state.cell_vals} />
 
-					{!gameEnded && (
-						<div className="floating-reactions">
-							<button aria-label="Laugh" onClick={function() { self.handleDisturb('laugh') }} className="reaction-icon">😂</button>
-							<button aria-label="Love" onClick={function() { self.handleDisturb('love') }} className="reaction-icon">❤️</button>
-							<button aria-label="Lightning" onClick={function() { self.handleDisturb('lightning') }} className="reaction-icon">⚡</button>
-							<button aria-label="Whisper" onClick={function() { self.handleDisturb('whisper') }} className="reaction-icon">🤫</button>
-						</div>
-					)}
+					<ReactionDock
+						items={REACTION_ITEMS}
+						hidden={gameEnded}
+						onReact={function(type) { self.handleDisturb(type) }}
+					/>
 				</div>
-
-				<button onClick={this.props.onLeave} className="button leave-btn">
-					Leave
-				</button>
 			</div>
 		)
 	}

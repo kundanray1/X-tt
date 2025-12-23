@@ -1,6 +1,75 @@
 import React, { Component } from 'react'
 import io from 'socket.io-client'
 
+function LobbyHeader(props) {
+	return (
+		<div className="lobby-hero">
+			<div className="lobby-title">
+				<h1>Game Lobby</h1>
+				<p className="lobby-subtitle">Start a new game or watch one in progress.</p>
+			</div>
+			<button
+				type="button"
+				onClick={props.onPlay}
+				className="button play-btn"
+			>
+				<span>Play a Game <span className="fa fa-gamepad"></span></span>
+			</button>
+		</div>
+	)
+}
+
+function SectionHeading(props) {
+	return (
+		<div className="section-heading">
+			<h2>
+				{props.title}
+				{typeof props.count === 'number' && <span className="count">({props.count})</span>}
+			</h2>
+			{props.subtitle && <p className="section-subtitle">{props.subtitle}</p>}
+		</div>
+	)
+}
+
+function LobbyNotice(props) {
+	return (
+		<div className={'lobby-notice ' + (props.variant || '')}>
+			<div className="notice-title">{props.title}</div>
+			{props.message && <div className="notice-body">{props.message}</div>}
+		</div>
+	)
+}
+
+function GameCard(props) {
+	var room = props.room || {}
+	var players = room.players || []
+	var left = players[0] || 'Player 1'
+	var right = players[1] || 'Player 2'
+	var spectators = room.spectatorCount || 0
+
+	return (
+		<div className="game-card" onClick={function() { props.onSelect(room) }}>
+			<div className="game-info">
+				<div className="players">
+					<span className="player">{left}</span>
+					<span className="vs">vs</span>
+					<span className="player">{right}</span>
+				</div>
+				<div className="spectators">
+					<span className="fa fa-eye"></span> {spectators} watching
+				</div>
+			</div>
+			<button
+				type="button"
+				className="spectate-btn"
+				onClick={function(e) { e.stopPropagation(); props.onSelect(room) }}
+			>
+				<span className="fa fa-eye"></span> Watch
+			</button>
+		</div>
+	)
+}
+
 export default class GameLobby extends Component {
 
 	constructor(props) {
@@ -90,56 +159,33 @@ export default class GameLobby extends Component {
 //	------------------------	------------------------	------------------------
 
 	render() {
-		var self = this
 		var rooms = this.state.rooms
+		var self = this
 
 		return (
-			<div id="GameLobby">
-				<h1>Game Lobby</h1>
-
-				<div className="lobby-actions">
-					<button 
-						type="button" 
-						onClick={this.handlePlay.bind(this)} 
-						className="button play-btn"
-					>
-						<span>Play a Game <span className="fa fa-gamepad"></span></span>
-					</button>
-				</div>
+			<div id="GameLobby" className="ttt-shell lobby-shell">
+				<LobbyHeader onPlay={this.handlePlay.bind(this)} />
 
 				<div className="ongoing-games">
-					<h2>Ongoing Games {rooms.length > 0 && <span className="count">({rooms.length})</span>}</h2>
+					<SectionHeading title="Ongoing Games" count={rooms.length} />
 					
 					{this.state.loading && (
-						<div className="loading">Loading games...</div>
+						<LobbyNotice title="Loading games..." variant="loading" />
 					)}
 
 					{!this.state.loading && rooms.length === 0 && (
-						<div className="no-games">
-							<p>No games in progress right now.</p>
-							<p>Start a game and invite someone to play!</p>
-						</div>
+						<LobbyNotice
+							title="No games in progress right now."
+							message="Start a game and invite someone to play."
+							variant="empty"
+						/>
 					)}
 
 					{rooms.length > 0 && (
 						<div className="games-list">
 							{rooms.map(function(room) {
 								return (
-									<div key={room.roomId} className="game-card" onClick={function() { self.handleSpectate(room) }}>
-										<div className="game-info">
-											<div className="players">
-												<span className="player">{room.players[0]}</span>
-												<span className="vs">vs</span>
-												<span className="player">{room.players[1]}</span>
-											</div>
-											<div className="spectators">
-												<span className="fa fa-eye"></span> {room.spectatorCount} watching
-											</div>
-										</div>
-										<button className="spectate-btn">
-											<span className="fa fa-eye"></span> Watch
-										</button>
-									</div>
+									<GameCard key={room.roomId} room={room} onSelect={self.handleSpectate.bind(self)} />
 								)
 							}.bind(this))}
 						</div>

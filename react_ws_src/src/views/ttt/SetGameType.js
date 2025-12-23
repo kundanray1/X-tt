@@ -12,7 +12,7 @@ export default class SetGameType extends Component {
 
 	render () {
 		return (
-			<div id='SetGameType'>
+			<div id='SetGameType' className="ttt-shell set-game-type">
 
 				<h1>Choose game type</h1>
 
