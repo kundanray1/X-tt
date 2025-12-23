@@ -46,6 +46,8 @@ function pair_avail_players() {
 	playerSockets[p1.sockid] = p1;
 	playerSockets[p2.sockid] = p2;
 
+	spectatorManager.registerPlayers(roomId, p1.sockid, p2.sockid);
+
 	io.to(p1.sockid).emit("pair_players", {opp: {name:p2.name, uid:p2.uid}, mode:'m', roomId: roomId});
 	io.to(p2.sockid).emit("pair_players", {opp: {name:p1.name, uid:p1.uid}, mode:'s', roomId: roomId});
 
@@ -66,6 +68,8 @@ function onCreateRoom(data) {
 	this.player = { name: name, sockid: this.id, roomId: roomId };
 	playerSockets[this.id] = this.player;
 
+	spectatorManager.registerPlayers(roomId, this.id, 'computer');
+
 	this.emit("room_created", { roomId: roomId });
 
 	io.emit("room_available", { 
@@ -83,7 +87,45 @@ function onTurn(data) {
 
 	io.to(this.player.opp.sockid).emit("opp_turn", {cell_id: data.cell_id});
 
+	if (this.player.roomId) {
+		var spectators = spectatorManager.getRoomSpectators(this.player.roomId);
+		var self = this;
+		spectators.forEach(function(specId) {
+			io.to(specId).emit("game:turn", { player: self.player.name, cell_id: data.cell_id });
+		});
+	}
+
 	console.log("turn - " + this.player.name + " - cell: " + data.cell_id);
+};
+
+// ----	--------------------------------------------	--------------------------------------------	
+
+function onGameEnd(data) {
+
+	var roomId = this.player.roomId;
+	if (!roomId) return;
+
+	spectatorManager.setGameWinningState(roomId, true);
+
+	var winnerId = null;
+	if (data.winner === 'self') winnerId = this.player.sockid;
+	else if (data.winner === 'opp') winnerId = this.player.opp.sockid;
+
+	var betResults = spectatorManager.settleBets(roomId, winnerId);
+
+	var spectators = spectatorManager.getRoomSpectators(roomId);
+	spectators.forEach(function(specId) {
+		var result = betResults[specId] || { won: false, payout: 0 };
+		io.to(specId).emit("game:end", { winner: data.winner, result: result });
+	});
+
+	spectatorManager.cleanupRoom(roomId);
+	GameStore.deleteRoom(roomId);
+	delete playerSockets[this.player.sockid];
+	if (this.player.opp) delete playerSockets[this.player.opp.sockid];
+	io.emit("room_closed", { roomId: roomId });
+
+	console.log("Game ended - room: " + roomId);
 };
 
 // ----	--------------------------------------------	--------------------------------------------	
@@ -91,6 +133,9 @@ function onTurn(data) {
 function onClientDisconnect() {
 
 	var removePlayer = this.player;
+	
+	spectatorManager.leaveRoom(this.id);
+
 	if (!removePlayer) return;
 
 	players.splice(players.indexOf(removePlayer), 1);
@@ -101,6 +146,7 @@ function onClientDisconnect() {
 	}
 
 	if (removePlayer.roomId) {
+		spectatorManager.cleanupRoom(removePlayer.roomId);
 		GameStore.deleteRoom(removePlayer.roomId);
 		io.emit("room_closed", { roomId: removePlayer.roomId });
 	}
@@ -119,7 +165,153 @@ function onGetRooms() {
 };
 
 // ----	--------------------------------------------	--------------------------------------------	
-// 		SOCKET HANDLERS
+// 		SPECTATOR HANDLERS
+// ----	--------------------------------------------	--------------------------------------------	
+
+function onSpectatorJoin(data) {
+
+	var roomId = data.roomId;
+	var name = data.name || 'Spectator';
+
+	var room = GameStore.getRoom(roomId);
+	if (!room) {
+		this.emit("spectator:error", { message: "Room not found" });
+		return;
+	}
+
+	spectatorManager.joinRoom(this.id, roomId, name);
+	this.spectatorRoom = roomId;
+	this.spectatorName = name;
+
+	var bets = spectatorManager.getRoomBets(roomId);
+	var points = spectatorManager.getSpectatorPoints(this.id);
+	
+	this.emit("spectator:joined", {
+		roomId: roomId,
+		players: [
+			{ name: room.players[0].name, id: room.players[0].sockId },
+			{ name: room.players[1].name, id: room.players[1].sockId }
+		],
+		bets: bets,
+		yourPoints: points
+	});
+
+	var spectators = spectatorManager.getRoomSpectators(roomId);
+	GameStore.updateSpectatorCount(roomId, spectators.length);
+	notifySpectatorCount(roomId);
+};
+
+// ----	--------------------------------------------	--------------------------------------------	
+
+function onSpectatorDisturb(data) {
+
+	var roomId = this.spectatorRoom;
+	if (!roomId) return;
+
+	if (!spectatorManager.canDisturb(this.id).allowed) {
+		this.emit("spectator:cooldown", { remaining: 15 });
+		return;
+	}
+
+	if (spectatorManager.isGameWinning(roomId)) return;
+
+	var room = GameStore.getRoom(roomId);
+	if (!room) return;
+
+	spectatorManager.recordDisturb(this.id);
+
+	var disturbData = {
+		type: data.type || 'nudge',
+		side: Math.random() > 0.5 ? 'left' : 'right',
+		from: this.spectatorName
+	};
+
+	io.to(room.players[0].sockId).emit("spectator:disturb", disturbData);
+	io.to(room.players[1].sockId).emit("spectator:disturb", disturbData);
+};
+
+// ----	--------------------------------------------	--------------------------------------------	
+
+function onSpectatorBet(data) {
+
+	var roomId = this.spectatorRoom;
+	if (!roomId) return;
+
+	var result = spectatorManager.placeBet(this.id, data.playerId, data.amount);
+	
+	if (result.success) {
+		this.emit("bet:placed", { playerId: data.playerId, amount: data.amount, yourPoints: result.remainingPoints });
+		notifyBetUpdate(roomId);
+	} else {
+		this.emit("bet:error", { message: result.reason });
+	}
+};
+
+// ----	--------------------------------------------	--------------------------------------------	
+
+function onSpectatorChangeBet(data) {
+
+	var roomId = this.spectatorRoom;
+	if (!roomId) return;
+
+	var result = spectatorManager.changeBet(this.id, data.playerId);
+	
+	if (result.success) {
+		this.emit("bet:changed", { playerId: data.playerId });
+		notifyBetSwitch(roomId, this.spectatorName, data.playerId);
+		notifyBetUpdate(roomId);
+	} else {
+		this.emit("bet:error", { message: result.reason });
+	}
+};
+
+// ----	--------------------------------------------	--------------------------------------------	
+
+function onPlayerMute(data) {
+
+	var roomId = this.player.roomId;
+	if (!roomId) return;
+
+	spectatorManager.setPlayerMute(roomId, this.player.sockid, data.muted);
+};
+
+// ----	--------------------------------------------	--------------------------------------------	
+// 		HELPERS
+// ----	--------------------------------------------	--------------------------------------------	
+
+function notifySpectatorCount(roomId) {
+	var room = GameStore.getRoom(roomId);
+	if (!room) return;
+
+	var spectators = spectatorManager.getRoomSpectators(roomId);
+	var count = spectators.length;
+
+	io.to(room.players[0].sockId).emit("spectator:count", { count: count });
+	io.to(room.players[1].sockId).emit("spectator:count", { count: count });
+}
+
+function notifyBetUpdate(roomId) {
+	var room = GameStore.getRoom(roomId);
+	if (!room) return;
+
+	var bets = spectatorManager.getRoomBets(roomId);
+	var p1Id = room.players[0].sockId;
+	var p2Id = room.players[1].sockId;
+
+	io.to(p1Id).emit("bet:update", { supporters: bets.byPlayer[p1Id] || [], total: bets.totals[p1Id] || 0 });
+	io.to(p2Id).emit("bet:update", { supporters: bets.byPlayer[p2Id] || [], total: bets.totals[p2Id] || 0 });
+}
+
+function notifyBetSwitch(roomId, spectatorName, newPlayerId) {
+	var room = GameStore.getRoom(roomId);
+	if (!room) return;
+
+	io.to(room.players[0].sockId).emit("bet:switch", { name: spectatorName, to: newPlayerId });
+	io.to(room.players[1].sockId).emit("bet:switch", { name: spectatorName, to: newPlayerId });
+}
+
+// ----	--------------------------------------------	--------------------------------------------	
+// 		SOCKET WIRING
 // ----	--------------------------------------------	--------------------------------------------	
 
 set_game_sock_handlers = function (socket) {
@@ -127,7 +319,15 @@ set_game_sock_handlers = function (socket) {
 	socket.on("new player", onNewPlayer);
 	socket.on("create_room", onCreateRoom);
 	socket.on("ply_turn", onTurn);
+	socket.on("game_end", onGameEnd);
 	socket.on("get_rooms", onGetRooms);
-	socket.on("disconnect", onClientDisconnect);
 
+	socket.on("spectator:join", onSpectatorJoin);
+	socket.on("spectator:disturb", onSpectatorDisturb);
+	socket.on("spectator:bet", onSpectatorBet);
+	socket.on("spectator:change_bet", onSpectatorChangeBet);
+
+	socket.on("player:mute", onPlayerMute);
+
+	socket.on("disconnect", onClientDisconnect);
 };
