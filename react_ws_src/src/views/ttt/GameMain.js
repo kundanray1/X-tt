@@ -26,6 +26,8 @@ export default class SetName extends Component {
 		]
 
 
+		this.sock_start()
+
 		if (this.props.game_type != 'live')
 			this.state = {
 				cell_vals: {},
@@ -34,8 +36,6 @@ export default class SetName extends Component {
 				game_stat: 'Start game'
 			}
 		else {
-			this.sock_start()
-
 			this.state = {
 				cell_vals: {},
 				next_turn_ply: true,
@@ -62,7 +62,14 @@ export default class SetName extends Component {
 		this.socket.on('connect', function(data) { 
 			// console.log('socket connected', data)
 
-			this.socket.emit('new player', { name: app.settings.curr_user.name });
+			if (this.props.game_type == 'live') {
+				this.socket.emit('new player', { name: app.settings.curr_user.name });
+			} else {
+				this.socket.emit('create_room', { 
+					name: app.settings.curr_user.name,
+					gameType: 'computer'
+				});
+			}
 
 		}.bind(this));
 
@@ -77,10 +84,11 @@ export default class SetName extends Component {
 
 		}.bind(this));
 
+		this.socket.on('room_created', function(data) {
+			this.roomId = data.roomId
+		}.bind(this));
 
 		this.socket.on('opp_turn', this.turn_opp_live.bind(this));
-
-
 
 	}
 
