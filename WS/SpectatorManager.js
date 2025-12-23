@@ -43,7 +43,8 @@ SpectatorManager.prototype.getOrCreateRoom = function(roomId) {
             bets: new Map(),
             mutedByPlayers: new Set(),
             activeDisturbance: null,
-            gameEnded: false
+            gameEnded: false,
+            moves: []
         });
     }
     return this.rooms.get(roomId);
@@ -157,6 +158,44 @@ SpectatorManager.prototype.calculateIntensity = function(count) {
     if (count >= 5) return 3;
     if (count >= 3) return 2;
     return 1;
+};
+
+SpectatorManager.prototype.recordMove = function(roomId, playerId, cellId, playerName, mark) {
+    var room = this.rooms.get(roomId);
+    if (!room) return;
+    room.moves.push({
+        playerId: playerId,
+        cell_id: cellId,
+        playerName: playerName || null,
+        mark: mark || null
+    });
+};
+
+SpectatorManager.prototype.getRoomMoves = function(roomId) {
+    var room = this.rooms.get(roomId);
+    if (!room || !room.moves) return [];
+    return room.moves.slice();
+};
+
+SpectatorManager.prototype.getMarkForPlayer = function(roomId, playerId) {
+    var room = this.rooms.get(roomId);
+    if (!room) return 'x';
+    if (room.players.player1 && playerId === room.players.player1) return 'x';
+    if (room.players.player2 && playerId === room.players.player2) return 'o';
+    // fallback: first join is X
+    return 'x';
+};
+
+SpectatorManager.prototype.buildCellVals = function(roomId) {
+    var room = this.rooms.get(roomId);
+    if (!room || !room.moves) return {};
+    var cell_vals = {};
+    var self = this;
+    room.moves.forEach(function(move) {
+        var mark = move.mark || self.getMarkForPlayer(roomId, move.playerId);
+        cell_vals[move.cell_id] = mark;
+    });
+    return cell_vals;
 };
 
 // ----	--------------------------------------------	--------------------------------------------	

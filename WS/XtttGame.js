@@ -85,17 +85,14 @@ function onCreateRoom(data) {
 
 function onTurn(data) {
 
-	io.to(this.player.opp.sockid).emit("opp_turn", {cell_id: data.cell_id});
-
-	if (this.player.roomId) {
-		var spectators = spectatorManager.getRoomSpectators(this.player.roomId);
-		var self = this;
-		spectators.forEach(function(specId) {
-			io.to(specId).emit("game:turn", { player: self.player.name, cell_id: data.cell_id });
-		});
+	if (this.player && this.player.opp && this.player.opp.sockid) {
+		io.to(this.player.opp.sockid).emit("opp_turn", {cell_id: data.cell_id});
 	}
 
-	console.log("turn - " + this.player.name + " - cell: " + data.cell_id);
+	broadcastSpectatorTurn(this.player && this.player.roomId, this.player && this.player.sockid, this.player && this.player.name, data.cell_id);
+
+	var playerName = this.player ? this.player.name : 'player';
+	console.log("turn - " + playerName + " - cell: " + data.cell_id);
 };
 
 // ----	--------------------------------------------	--------------------------------------------	
@@ -107,16 +104,22 @@ function onGameEnd(data) {
 
 	spectatorManager.setGameWinningState(roomId, true);
 
+	var room = GameStore.getRoom(roomId);
 	var winnerId = null;
 	if (data.winner === 'self') winnerId = this.player.sockid;
 	else if (data.winner === 'opp') winnerId = this.player.opp.sockid;
 
-	var betResults = spectatorManager.settleBets(roomId, winnerId);
+	var winnerName = 'Unknown';
+	if (data.winner === 'draw') {
+		winnerName = 'Draw';
+	} else if (room && room.players) {
+		if (winnerId === room.players[0].sockId) winnerName = room.players[0].name;
+		else if (winnerId === room.players[1].sockId) winnerName = room.players[1].name;
+	}
 
 	var spectators = spectatorManager.getRoomSpectators(roomId);
 	spectators.forEach(function(specId) {
-		var result = betResults[specId] || { won: false, payout: 0 };
-		io.to(specId).emit("game:end", { winner: data.winner, result: result });
+		io.to(specId).emit("game:end", { winner: data.winner, winnerName: winnerName });
 	});
 
 	spectatorManager.cleanupRoom(roomId);
@@ -183,17 +186,14 @@ function onSpectatorJoin(data) {
 	this.spectatorRoom = roomId;
 	this.spectatorName = name;
 
-	var bets = spectatorManager.getRoomBets(roomId);
-	var points = spectatorManager.getSpectatorPoints(this.id);
-	
 	this.emit("spectator:joined", {
 		roomId: roomId,
 		players: [
 			{ name: room.players[0].name, id: room.players[0].sockId },
 			{ name: room.players[1].name, id: room.players[1].sockId }
 		],
-		bets: bets,
-		yourPoints: points
+		moves: spectatorManager.getRoomMoves(roomId),
+		cellVals: spectatorManager.buildCellVals(roomId),
 	});
 
 	var spectators = spectatorManager.getRoomSpectators(roomId);
@@ -208,64 +208,17 @@ function onSpectatorDisturb(data) {
 	var roomId = this.spectatorRoom;
 	if (!roomId) return;
 
-	if (!spectatorManager.canDisturb(this.id).allowed) {
-		this.emit("spectator:cooldown", { remaining: 15 });
-		return;
-	}
-
 	if (spectatorManager.isGameWinning(roomId)) return;
 
 	var room = GameStore.getRoom(roomId);
 	if (!room) return;
 
-	spectatorManager.recordDisturb(this.id);
-
-	var disturbData = {
-		type: data.type || 'nudge',
-		side: Math.random() > 0.5 ? 'left' : 'right',
-		from: this.spectatorName
-	};
+	var disturbData = spectatorManager.recordDisturb(this.id, data.type || 'nudge');
+	if (!disturbData) return;
 
 	io.to(room.players[0].sockId).emit("spectator:disturb", disturbData);
 	io.to(room.players[1].sockId).emit("spectator:disturb", disturbData);
 };
-
-// ----	--------------------------------------------	--------------------------------------------	
-
-function onSpectatorBet(data) {
-
-	var roomId = this.spectatorRoom;
-	if (!roomId) return;
-
-	var result = spectatorManager.placeBet(this.id, data.playerId, data.amount);
-	
-	if (result.success) {
-		this.emit("bet:placed", { playerId: data.playerId, amount: data.amount, yourPoints: result.remainingPoints });
-		notifyBetUpdate(roomId);
-	} else {
-		this.emit("bet:error", { message: result.reason });
-	}
-};
-
-// ----	--------------------------------------------	--------------------------------------------	
-
-function onSpectatorChangeBet(data) {
-
-	var roomId = this.spectatorRoom;
-	if (!roomId) return;
-
-	var result = spectatorManager.changeBet(this.id, data.playerId);
-	
-	if (result.success) {
-		this.emit("bet:changed", { playerId: data.playerId });
-		notifyBetSwitch(roomId, this.spectatorName, data.playerId);
-		notifyBetUpdate(roomId);
-	} else {
-		this.emit("bet:error", { message: result.reason });
-	}
-};
-
-// ----	--------------------------------------------	--------------------------------------------	
 
 function onPlayerMute(data) {
 
@@ -290,24 +243,23 @@ function notifySpectatorCount(roomId) {
 	io.to(room.players[1].sockId).emit("spectator:count", { count: count });
 }
 
-function notifyBetUpdate(roomId) {
-	var room = GameStore.getRoom(roomId);
-	if (!room) return;
-
-	var bets = spectatorManager.getRoomBets(roomId);
-	var p1Id = room.players[0].sockId;
-	var p2Id = room.players[1].sockId;
-
-	io.to(p1Id).emit("bet:update", { supporters: bets.byPlayer[p1Id] || [], total: bets.totals[p1Id] || 0 });
-	io.to(p2Id).emit("bet:update", { supporters: bets.byPlayer[p2Id] || [], total: bets.totals[p2Id] || 0 });
+function broadcastSpectatorTurn(roomId, playerId, playerName, cellId) {
+	if (!roomId) return;
+	var mark = spectatorManager.getMarkForPlayer(roomId, playerId);
+	spectatorManager.recordMove(roomId, playerId, cellId, playerName, mark);
+	var cellVals = spectatorManager.buildCellVals(roomId);
+	var spectators = spectatorManager.getRoomSpectators(roomId);
+	spectators.forEach(function(specId) {
+		io.to(specId).emit("game:turn", { player: playerName, playerId: playerId, cell_id: cellId, mark: mark, cellVals: cellVals });
+	});
 }
 
-function notifyBetSwitch(roomId, spectatorName, newPlayerId) {
-	var room = GameStore.getRoom(roomId);
-	if (!room) return;
-
-	io.to(room.players[0].sockId).emit("bet:switch", { name: spectatorName, to: newPlayerId });
-	io.to(room.players[1].sockId).emit("bet:switch", { name: spectatorName, to: newPlayerId });
+function onSpectatorTurn(data) {
+	if (!this.player || !this.player.roomId) return;
+	var roomId = this.player.roomId;
+	var playerId = data.playerId || this.player.sockid;
+	var playerName = data.playerName || this.player.name;
+	broadcastSpectatorTurn(roomId, playerId, playerName, data.cell_id);
 }
 
 // ----	--------------------------------------------	--------------------------------------------	
@@ -324,8 +276,7 @@ set_game_sock_handlers = function (socket) {
 
 	socket.on("spectator:join", onSpectatorJoin);
 	socket.on("spectator:disturb", onSpectatorDisturb);
-	socket.on("spectator:bet", onSpectatorBet);
-	socket.on("spectator:change_bet", onSpectatorChangeBet);
+	socket.on("game:turn:spectator", onSpectatorTurn);
 
 	socket.on("player:mute", onPlayerMute);
 
