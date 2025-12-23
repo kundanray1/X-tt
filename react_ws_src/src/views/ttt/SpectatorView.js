@@ -6,17 +6,17 @@ export default class SpectatorView extends Component {
 
 	constructor(props) {
 		super(props)
+		var initialPlayers = (props.room && props.room.players) ? props.room.players.map(function(name) {
+			return { name: name, id: name }
+		}) : []
 		this.state = {
 			cell_vals: {},
-			connected: false,
 			gameStatus: 'Connecting...',
-			points: 100,
-			cooldownRemaining: 0,
-			myBet: null,
-			bets: { byPlayer: {}, totals: {} }
+			gameEnded: false,
+			players: initialPlayers
 		}
 		this.socket = null
-		this.cooldownTimer = null
+		this.redirectTimer = null
 	}
 
 	componentDidMount() {
@@ -25,125 +25,91 @@ export default class SpectatorView extends Component {
 
 	componentWillUnmount() {
 		if (this.socket) this.socket.disconnect()
-		if (this.cooldownTimer) clearInterval(this.cooldownTimer)
+		if (this.redirectTimer) clearTimeout(this.redirectTimer)
 	}
 
 	connectSocket() {
+		var room = this.props.room || {}
 		this.socket = io(app.settings.ws_conf.loc.SOCKET__io.u)
 
 		this.socket.on('connect', function() {
 			this.socket.emit('spectator:join', {
-				roomId: this.props.roomId,
+				roomId: room.roomId,
 				name: app.settings.curr_user ? app.settings.curr_user.name : 'Spectator'
 			})
 		}.bind(this))
 
 		this.socket.on('spectator:joined', function(data) {
+			var players = data.players && data.players.length ? data.players : this.state.players
+			var names = players.map(function(p) { return p.name })
+			var cellVals = data.cellVals || this.buildBoardFromMoves(data.moves || [], players)
 			this.setState({
-				connected: true,
-				points: data.yourPoints,
-				bets: data.bets,
-				gameStatus: 'Watching: ' + this.props.players.join(' vs ')
+				players: players,
+				gameStatus: 'Watching: ' + names.join(' vs '),
+				cell_vals: cellVals
 			})
 		}.bind(this))
 
 		this.socket.on('game:turn', function(data) {
-			var cell_vals = Object.assign({}, this.state.cell_vals)
-			cell_vals[data.cell_id] = data.player === this.props.players[0] ? 'x' : 'o'
+			var cell_vals = data.cellVals ? data.cellVals : Object.assign({}, this.state.cell_vals)
+			if (!data.cellVals) {
+				var mark = data.mark || 'x'
+				cell_vals[data.cell_id] = mark
+			}
 			this.setState({ cell_vals: cell_vals })
 		}.bind(this))
 
 		this.socket.on('game:end', function(data) {
-			var msg = data.winner === 'draw' ? 'Draw!' : 'Game Over'
-			this.setState({ gameStatus: msg })
+			var players = this.state.players.length ? this.state.players : (room.players || []).map(function(name) { return { name: name, id: name } })
+			var winnerName = data.winnerName || (data.winner === 'draw' ? 'Draw' : (players[0] && data.winner === 'self' ? players[0].name : players[1] && data.winner === 'opp' ? players[1].name : data.winner))
+			var msg = data.winner === 'draw' ? 'Game ended in a draw' : (winnerName + ' won the game')
+			this.setState({ gameStatus: msg, gameEnded: true })
+			if (this.redirectTimer) clearTimeout(this.redirectTimer)
+			this.redirectTimer = setTimeout(function() {
+				window.location.href = 'http://localhost:3000/ttt'
+			}, 5000)
 		}.bind(this))
-
-		this.socket.on('bet:placed', function(data) {
-			this.setState({ myBet: { playerId: data.playerId, amount: data.amount }, points: data.yourPoints })
-		}.bind(this))
-
-		this.socket.on('spectator:cooldown', function() {
-			this.startCooldown()
-		}.bind(this))
-	}
-
-	startCooldown() {
-		this.setState({ cooldownRemaining: 15 })
-		if (this.cooldownTimer) clearInterval(this.cooldownTimer)
-		
-		this.cooldownTimer = setInterval(function() {
-			var remaining = this.state.cooldownRemaining - 1
-			if (remaining <= 0) {
-				clearInterval(this.cooldownTimer)
-				remaining = 0
-			}
-			this.setState({ cooldownRemaining: remaining })
-		}.bind(this), 1000)
 	}
 
 	handleDisturb(type) {
-		if (this.state.cooldownRemaining > 0) return
 		this.socket.emit('spectator:disturb', { type: type })
-		this.startCooldown()
 	}
 
-	handleBet(playerId, amount) {
-		this.socket.emit('spectator:bet', { playerId: playerId, amount: amount })
+	buildBoardFromMoves(moves, players) {
+		var cell_vals = {}
+		if (!moves || !moves.length) return cell_vals
+		var roster = players && players.length ? players : []
+		moves.forEach(function(move) {
+			var idx = roster.findIndex(function(p) { return move.playerId ? p.id === move.playerId : false })
+			if (idx === -1 && move.playerName) idx = roster.findIndex(function(p) { return p.name === move.playerName })
+			if (idx === -1) idx = 0
+			var mark = move.mark || (idx === 0 ? 'x' : 'o')
+			cell_vals[move.cell_id] = mark
+		})
+		return cell_vals
 	}
 
 	render() {
 		var self = this
-		var cooldown = this.state.cooldownRemaining
-		var canDisturb = cooldown === 0
+		var gameEnded = this.state.gameEnded
 
 		return (
 			<div id="SpectatorView">
 				<div className="spectator-header">
 					<h2>{this.state.gameStatus}</h2>
-					<div className="points-display">
-						<span className="fa fa-star"></span> {this.state.points} pts
-					</div>
 				</div>
 
-				<GameBoard cellVals={this.state.cell_vals} />
+				<div className="board-area" id="game_board">
+					<GameBoard cellVals={this.state.cell_vals} />
 
-				<div className="spectator-controls">
-					<div className="betting-section">
-						<h3>Bet</h3>
-						<div className="bet-options">
-							{this.props.players.map(function(player, idx) {
-								var playerId = self.props.playerIds[idx]
-								return (
-									<button 
-										key={idx}
-										onClick={function() { self.handleBet(playerId, 10) }}
-										disabled={self.state.myBet}
-										className="button bet-btn"
-									>
-										{player} (10 pts)
-									</button>
-								)
-							})}
+					{!gameEnded && (
+						<div className="floating-reactions">
+							<button aria-label="Laugh" onClick={function() { self.handleDisturb('laugh') }} className="reaction-icon">😂</button>
+							<button aria-label="Love" onClick={function() { self.handleDisturb('love') }} className="reaction-icon">❤️</button>
+							<button aria-label="Lightning" onClick={function() { self.handleDisturb('lightning') }} className="reaction-icon">⚡</button>
+							<button aria-label="Whisper" onClick={function() { self.handleDisturb('whisper') }} className="reaction-icon">🤫</button>
 						</div>
-						{this.state.myBet && (
-							<div className="my-bet">Bet placed: {this.state.myBet.amount} pts</div>
-						)}
-					</div>
-
-					<div className="disturb-section">
-						<h3>Disturb {cooldown > 0 && <span>({cooldown}s)</span>}</h3>
-						<div className="disturb-buttons">
-							<button onClick={function() { self.handleDisturb('nudge') }} disabled={!canDisturb} className="button">
-								Nudge
-							</button>
-							<button onClick={function() { self.handleDisturb('whisper') }} disabled={!canDisturb} className="button">
-								Whisper
-							</button>
-							<button onClick={function() { self.handleDisturb('fog') }} disabled={!canDisturb} className="button">
-								Fog
-							</button>
-						</div>
-					</div>
+					)}
 				</div>
 
 				<button onClick={this.props.onLeave} className="button leave-btn">

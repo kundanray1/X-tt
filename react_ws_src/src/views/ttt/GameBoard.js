@@ -15,7 +15,10 @@ export default class GameBoard extends Component {
 
 	handleClick(e) {
 		if (!this.props.onCellClick) return
-		var cellId = e.currentTarget.id.substr(11)
+		var cellId = e.currentTarget && e.currentTarget.dataset ? e.currentTarget.dataset.cell : null
+		if (!cellId && e.currentTarget) {
+			cellId = e.currentTarget.getAttribute('data-cell')
+		}
 		this.props.onCellClick(cellId)
 	}
 
@@ -25,27 +28,42 @@ export default class GameBoard extends Component {
 		}
 	}
 
-	render() {
+	renderCell(id, extraClass) {
 		var onClick = this.props.onCellClick ? this.handleClick.bind(this) : null
-
+		var winCells = this.props.winCells || []
+		var cls = extraClass ? extraClass.split(' ') : []
+		if (winCells.indexOf(id) !== -1) cls.push('win')
 		return (
-			<div id="game_board">
+			<td 
+				id={'game_board-' + id} 
+				data-cell={id}
+				ref={id} 
+				onClick={onClick} 
+				className={cls.join(' ').trim()}>
+				{this.cell_cont(id)}
+			</td>
+		)
+	}
+
+	render() {
+		return (
+			<div className="game-board-grid">
 				<table>
 					<tbody>
 						<tr>
-							<td id="game_board-c1" ref="c1" onClick={onClick}>{this.cell_cont('c1')}</td>
-							<td id="game_board-c2" ref="c2" onClick={onClick} className="vbrd">{this.cell_cont('c2')}</td>
-							<td id="game_board-c3" ref="c3" onClick={onClick}>{this.cell_cont('c3')}</td>
+							{this.renderCell('c1')}
+							{this.renderCell('c2', 'vbrd')}
+							{this.renderCell('c3')}
 						</tr>
 						<tr>
-							<td id="game_board-c4" ref="c4" onClick={onClick} className="hbrd">{this.cell_cont('c4')}</td>
-							<td id="game_board-c5" ref="c5" onClick={onClick} className="vbrd hbrd">{this.cell_cont('c5')}</td>
-							<td id="game_board-c6" ref="c6" onClick={onClick} className="hbrd">{this.cell_cont('c6')}</td>
+							{this.renderCell('c4', 'hbrd')}
+							{this.renderCell('c5', 'vbrd hbrd')}
+							{this.renderCell('c6', 'hbrd')}
 						</tr>
 						<tr>
-							<td id="game_board-c7" ref="c7" onClick={onClick}>{this.cell_cont('c7')}</td>
-							<td id="game_board-c8" ref="c8" onClick={onClick} className="vbrd">{this.cell_cont('c8')}</td>
-							<td id="game_board-c9" ref="c9" onClick={onClick}>{this.cell_cont('c9')}</td>
+							{this.renderCell('c7')}
+							{this.renderCell('c8', 'vbrd')}
+							{this.renderCell('c9')}
 						</tr>
 					</tbody>
 				</table>
@@ -53,4 +71,3 @@ export default class GameBoard extends Component {
 		)
 	}
 }
-

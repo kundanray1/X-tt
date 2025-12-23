@@ -4,6 +4,7 @@ import SetName from './SetName'
 import SetGameType from './SetGameType'
 import GameMain from './GameMain'
 import GameLobby from './GameLobby'
+import SpectatorView from './SpectatorView'
 
 export default class Ttt extends Component {
 
@@ -12,7 +13,8 @@ export default class Ttt extends Component {
 
 		this.state = {
 			mode: 'lobby',
-			game_type: null
+			game_type: null,
+			spectate_room: null
 		}
 	}
 
@@ -26,7 +28,10 @@ export default class Ttt extends Component {
 			<section id="TTT_game">
 				<div id="page-container">
 					{mode === 'lobby' && (
-						<GameLobby onSelectPlay={this.handleSelectPlay.bind(this)} />
+						<GameLobby 
+							onSelectPlay={this.handleSelectPlay.bind(this)} 
+							onSelectSpectate={this.handleSelectSpectate.bind(this)}
+						/>
 					)}
 
 					{mode === 'set_name' && (
@@ -48,6 +53,13 @@ export default class Ttt extends Component {
 								onEndGame={this.handleEndGame.bind(this)}
 							/>
 						</div>
+					)}
+
+					{mode === 'spectating' && this.state.spectate_room && (
+						<SpectatorView 
+							room={this.state.spectate_room}
+							onLeave={this.handleLeaveSpectate.bind(this)}
+						/>
 					)}
 				</div>
 			</section>
@@ -82,6 +94,18 @@ export default class Ttt extends Component {
 
 	handleEndGame() {
 		this.setState({ mode: 'lobby', game_type: null })
+	}
+
+//	------------------------	------------------------	------------------------
+
+	handleSelectSpectate(room) {
+		var name = window.prompt('Enter your name (optional):', app.settings.curr_user ? app.settings.curr_user.name : '') || ''
+		app.settings.curr_user = { name: name.trim() || 'Anonymous' }
+		this.setState({ mode: 'spectating', spectate_room: room })
+	}
+
+	handleLeaveSpectate() {
+		this.setState({ mode: 'lobby', spectate_room: null })
 	}
 
 }

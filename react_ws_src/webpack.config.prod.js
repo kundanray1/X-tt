@@ -34,6 +34,10 @@ module.exports = {
 				loader: 'file?name=[path][name].[ext]'
 			},
 			{
+				test: /\.(mp3|wav|ogg)$/,
+				loader: 'file?name=[path][name].[ext]'
+			},
+			{
 				test: /\.scss$/,
 				loader: ExtractTextPlugin.extract(
 					'style',

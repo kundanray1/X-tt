@@ -82,7 +82,15 @@ export default class GameLobby extends Component {
 
 //	------------------------	------------------------	------------------------
 
+	handleSpectate(room) {
+		if (this.socket) this.socket.disconnect()
+		this.props.onSelectSpectate(room)
+	}
+
+//	------------------------	------------------------	------------------------
+
 	render() {
+		var self = this
 		var rooms = this.state.rooms
 
 		return (
@@ -117,7 +125,7 @@ export default class GameLobby extends Component {
 						<div className="games-list">
 							{rooms.map(function(room) {
 								return (
-									<div key={room.roomId} className="game-card">
+									<div key={room.roomId} className="game-card" onClick={function() { self.handleSpectate(room) }}>
 										<div className="game-info">
 											<div className="players">
 												<span className="player">{room.players[0]}</span>
@@ -128,9 +136,12 @@ export default class GameLobby extends Component {
 												<span className="fa fa-eye"></span> {room.spectatorCount} watching
 											</div>
 										</div>
+										<button className="spectate-btn">
+											<span className="fa fa-eye"></span> Watch
+										</button>
 									</div>
 								)
-							})}
+							}.bind(this))}
 						</div>
 					)}
 				</div>
