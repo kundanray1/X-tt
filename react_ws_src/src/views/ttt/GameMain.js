@@ -6,11 +6,24 @@ import TweenMax from 'gsap'
 
 import rand_arr_elem from '../../helpers/rand_arr_elem'
 import rand_to_fro from '../../helpers/rand_to_fro'
+import GameBoard from './GameBoard'
+import { getReactionEmoji, normalizeReactionType } from './reactions'
+import reactionSound from '../../../static/sounds/move-self.mp3'
+import victorySound from '../../../static/sounds/victory-1-90174.mp3'
+import defeatSound from '../../../static/sounds/defeat.mp3'
+import loveSound from '../../../static/sounds/love.mp3'
+import hahaSound from '../../../static/sounds/haha.mp3'
+import whisperSound from '../../../static/sounds/whisper.mp3'
+import lighteningSound from '../../../static/sounds/lightening.mp3'
 
-export default class SetName extends Component {
+
+export default class GameMain extends Component {
 
 	constructor (props) {
 		super(props)
+
+		this.reactionTimeouts = {}
+		this.boardRef = null
 
 		this.win_sets = [
 			['c1', 'c2', 'c3'],
@@ -26,22 +39,17 @@ export default class SetName extends Component {
 		]
 
 
-		if (this.props.game_type != 'live')
-			this.state = {
-				cell_vals: {},
-				next_turn_ply: true,
-				game_play: true,
-				game_stat: 'Start game'
-			}
-		else {
-			this.sock_start()
+		this.sock_start()
 
-			this.state = {
-				cell_vals: {},
-				next_turn_ply: true,
-				game_play: false,
-				game_stat: 'Connecting'
-			}
+		var isLive = this.props.game_type == 'live'
+		this.state = {
+			cell_vals: {},
+			next_turn_ply: true,
+			game_play: !isLive,
+			game_stat: isLive ? 'Connecting' : 'Start game',
+			spectatorReactions: [],
+			winCells: [],
+			soundEnabled: false
 		}
 	}
 
@@ -62,7 +70,14 @@ export default class SetName extends Component {
 		this.socket.on('connect', function(data) { 
 			// console.log('socket connected', data)
 
-			this.socket.emit('new player', { name: app.settings.curr_user.name });
+			if (this.props.game_type == 'live') {
+				this.socket.emit('new player', { name: app.settings.curr_user.name });
+			} else {
+				this.socket.emit('create_room', { 
+					name: app.settings.curr_user.name,
+					gameType: 'computer'
+				});
+			}
 
 		}.bind(this));
 
@@ -77,10 +92,12 @@ export default class SetName extends Component {
 
 		}.bind(this));
 
+		this.socket.on('room_created', function(data) {
+			this.roomId = data.roomId
+		}.bind(this));
 
 		this.socket.on('opp_turn', this.turn_opp_live.bind(this));
-
-
+		this.socket.on('spectator:disturb', this.onSpectatorDisturb.bind(this));
 
 	}
 
@@ -89,18 +106,12 @@ export default class SetName extends Component {
 
 	componentWillUnmount () {
 
+		if (this.reactionTimeouts) {
+			Object.keys(this.reactionTimeouts).forEach(function(id) {
+				clearTimeout(this.reactionTimeouts[id])
+			}.bind(this))
+		}
 		this.socket && this.socket.disconnect();
-	}
-
-//	------------------------	------------------------	------------------------
-
-	cell_cont (c) {
-		const { cell_vals } = this.state
-
-		return (<div>
-		        	{cell_vals && cell_vals[c]=='x' && <i className="fa fa-times fa-5x"></i>}
-					{cell_vals && cell_vals[c]=='o' && <i className="fa fa-circle-o fa-5x"></i>}
-				</div>)
 	}
 
 //	------------------------	------------------------	------------------------
@@ -110,35 +121,48 @@ export default class SetName extends Component {
 		// console.log(cell_vals)
 
 		return (
-			<div id='GameMain'>
-
-				<h1>Play {this.props.game_type}</h1>
+			<div id='GameMain' className="ttt-shell game-shell">
+				<div className="game-header">
+					<h1>Play {this.props.game_type}</h1>
+					<button
+						type="button"
+						className="button ghost sound-btn"
+						onClick={this.toggleSound.bind(this)}
+					>
+						{this.state.soundEnabled ? 'Disable sound' : 'Enable sound'}
+					</button>
+				</div>
 
 				<div id="game_stat">
 					<div id="game_stat_msg">{this.state.game_stat}</div>
 					{this.state.game_play && <div id="game_turn_msg">{this.state.next_turn_ply ? 'Your turn' : 'Opponent turn'}</div>}
 				</div>
 
-				<div id="game_board">
-					<table>
-					<tbody>
-						<tr>
-							<td id='game_board-c1' ref='c1' onClick={this.click_cell.bind(this)}> {this.cell_cont('c1')} </td>
-							<td id='game_board-c2' ref='c2' onClick={this.click_cell.bind(this)} className="vbrd"> {this.cell_cont('c2')} </td>
-							<td id='game_board-c3' ref='c3' onClick={this.click_cell.bind(this)}> {this.cell_cont('c3')} </td>
-						</tr>
-						<tr>
-							<td id='game_board-c4' ref='c4' onClick={this.click_cell.bind(this)} className="hbrd"> {this.cell_cont('c4')} </td>
-							<td id='game_board-c5' ref='c5' onClick={this.click_cell.bind(this)} className="vbrd hbrd"> {this.cell_cont('c5')} </td>
-							<td id='game_board-c6' ref='c6' onClick={this.click_cell.bind(this)} className="hbrd"> {this.cell_cont('c6')} </td>
-						</tr>
-						<tr>
-							<td id='game_board-c7' ref='c7' onClick={this.click_cell.bind(this)}> {this.cell_cont('c7')} </td>
-							<td id='game_board-c8' ref='c8' onClick={this.click_cell.bind(this)} className="vbrd"> {this.cell_cont('c8')} </td>
-							<td id='game_board-c9' ref='c9' onClick={this.click_cell.bind(this)}> {this.cell_cont('c9')} </td>
-						</tr>
-					</tbody>
-					</table>
+				<div id="game_board" className="has-reactions board-frame">
+					<GameBoard 
+						ref={function(ref) { this.boardRef = ref }.bind(this)}
+						cellVals={cell_vals} 
+						onCellClick={this.click_cell.bind(this)} 
+						winCells={this.state.winCells}
+					/>
+
+					{this.state.game_play && (
+						<div className="reaction-flyers" aria-live="polite">
+							{this.state.spectatorReactions.map(function(reaction) {
+								var offset = reaction.offset || 0
+								return (
+									<div 
+										key={reaction.id} 
+										className={'reaction-flyer reaction-' + reaction.type}
+										style={{ left: offset + '%', animationDelay: (reaction.delay || 0) + 'ms', '--rise': (reaction.rise || 60) + 'px' }}
+									>
+										<span className="reaction-emoji">{reaction.emoji}</span>
+										<span className="reaction-text">{reaction.from}</span>
+									</div>
+								)
+							})}
+						</div>
+					)}
 				</div>
 
 				<button type='submit' onClick={this.end_game.bind(this)} className='button'><span>End Game <span className='fa fa-caret-right'></span></span></button>
@@ -150,13 +174,16 @@ export default class SetName extends Component {
 //	------------------------	------------------------	------------------------
 //	------------------------	------------------------	------------------------
 
-	click_cell (e) {
-		// console.log(e.currentTarget.id.substr(11))
-		// console.log(e.currentTarget)
+	click_cell (cellOrEvent) {
 
 		if (!this.state.next_turn_ply || !this.state.game_play) return
 
-		const cell_id = e.currentTarget.id.substr(11)
+		var cell_id = typeof cellOrEvent === 'string' ? cellOrEvent : null
+		if (!cell_id && cellOrEvent && cellOrEvent.currentTarget) {
+			var target = cellOrEvent.currentTarget
+			cell_id = (target.dataset && target.dataset.cell) || (target.id ? target.id.replace('game_board-', '') : null)
+		}
+		if (!cell_id || !/^c[1-9]$/.test(cell_id)) return
 		if (this.state.cell_vals[cell_id]) return
 
 		if (this.props.game_type != 'live')
@@ -169,24 +196,11 @@ export default class SetName extends Component {
 //	------------------------	------------------------	------------------------
 
 	turn_ply_comp (cell_id) {
-
-		let { cell_vals } = this.state
-
-		cell_vals[cell_id] = 'x'
-
-		TweenMax.from(this.refs[cell_id], 0.7, {opacity: 0, scaleX:0, scaleY:0, ease: Power4.easeOut})
-
-
-		// this.setState({
-		// 	cell_vals: cell_vals,
-		// 	next_turn_ply: false
-		// })
-
-		// setTimeout(this.turn_comp.bind(this), rand_to_fro(500, 1000));
-
-		this.state.cell_vals = cell_vals
-
-		this.check_turn()
+		this.applyMove(cell_id, 'x', {
+			emitSpectator: true,
+			playerId: this.socket && this.socket.id,
+			playerName: app.settings.curr_user.name
+		})
 	}
 
 //	------------------------	------------------------	------------------------
@@ -202,19 +216,11 @@ export default class SetName extends Component {
 		// console.log(cell_vals, empty_cells_arr, rand_arr_elem(empty_cells_arr))
 
 		const c = rand_arr_elem(empty_cells_arr)
-		cell_vals[c] = 'o'
-
-		TweenMax.from(this.refs[c], 0.7, {opacity: 0, scaleX:0, scaleY:0, ease: Power4.easeOut})
-
-
-		// this.setState({
-		// 	cell_vals: cell_vals,
-		// 	next_turn_ply: true
-		// })
-
-		this.state.cell_vals = cell_vals
-
-		this.check_turn()
+		this.applyMove(c, 'o', {
+			emitSpectator: true,
+			playerId: 'computer',
+			playerName: 'Computer'
+		})
 	}
 
 
@@ -222,49 +228,36 @@ export default class SetName extends Component {
 //	------------------------	------------------------	------------------------
 
 	turn_ply_live (cell_id) {
-
-		let { cell_vals } = this.state
-
-		cell_vals[cell_id] = 'x'
-
-		TweenMax.from(this.refs[cell_id], 0.7, {opacity: 0, scaleX:0, scaleY:0, ease: Power4.easeOut})
-
-		this.socket.emit('ply_turn', { cell_id: cell_id });
-
-		// this.setState({
-		// 	cell_vals: cell_vals,
-		// 	next_turn_ply: false
-		// })
-
-		// setTimeout(this.turn_comp.bind(this), rand_to_fro(500, 1000));
-
-		this.state.cell_vals = cell_vals
-
-		this.check_turn()
+		this.applyMove(cell_id, 'x', { emitTurn: true })
 	}
 
 //	------------------------	------------------------	------------------------
 
 	turn_opp_live (data) {
+		this.applyMove(data.cell_id, 'o')
+	}
 
+//	------------------------	------------------------	------------------------
+
+	applyMove (cell_id, mark, options) {
 		let { cell_vals } = this.state
-		let empty_cells_arr = []
+		cell_vals[cell_id] = mark
 
+		this.boardRef && this.boardRef.animateCell(cell_id)
 
-		const c = data.cell_id
-		cell_vals[c] = 'o'
+		if (options && options.emitSpectator) {
+			this.emitSpectatorTurn(cell_id, options.playerId, options.playerName)
+		}
 
-		TweenMax.from(this.refs[c], 0.7, {opacity: 0, scaleX:0, scaleY:0, ease: Power4.easeOut})
-
-
-		// this.setState({
-		// 	cell_vals: cell_vals,
-		// 	next_turn_ply: true
-		// })
+		if (options && options.emitTurn) {
+			this.socket && this.socket.emit('ply_turn', { cell_id: cell_id })
+		}
 
 		this.state.cell_vals = cell_vals
 
 		this.check_turn()
+
+		this.playMoveSound()
 	}
 
 //	------------------------	------------------------	------------------------
@@ -297,19 +290,17 @@ export default class SetName extends Component {
 
 		if (win) {
 		
-			this.refs[set[0]].classList.add('win')
-			this.refs[set[1]].classList.add('win')
-			this.refs[set[2]].classList.add('win')
-
-			TweenMax.killAll(true)
-			TweenMax.from('td.win', 1, {opacity: 0, ease: Linear.easeIn})
-
+			var winnerIsSelf = cell_vals[set[0]]=='x'
 			this.setState({
-				game_stat: (cell_vals[set[0]]=='x'?'You':'Opponent')+' win',
-				game_play: false
+				game_stat: (winnerIsSelf?'You':'Opponent')+' win',
+				game_play: false,
+				winCells: set
 			})
 
+			this.socket && this.socket.emit('game_end', { winner: winnerIsSelf ? 'self' : 'opp' })
 			this.socket && this.socket.disconnect();
+			if (winnerIsSelf) this.playVictorySound()
+			else this.playDefeatSound()
 
 		} else if (fin) {
 		
@@ -318,7 +309,10 @@ export default class SetName extends Component {
 				game_play: false
 			})
 
+			this.socket && this.socket.emit('game_end', { winner: 'draw' })
 			this.socket && this.socket.disconnect();
+			this.playVictorySound()
+			this.setState({ winCells: [] })
 
 		} else {
 			this.props.game_type!='live' && this.state.next_turn_ply && setTimeout(this.turn_comp.bind(this), rand_to_fro(500, 1000));
@@ -336,6 +330,112 @@ export default class SetName extends Component {
 		this.socket && this.socket.disconnect();
 
 		this.props.onEndGame()
+	}
+
+//	------------------------	------------------------	------------------------
+
+	emitSpectatorTurn(cell_id, playerId, playerName) {
+		if (!this.socket || !cell_id) return
+		var payload = { cell_id: cell_id }
+		if (playerId) payload.playerId = playerId
+		if (playerName) payload.playerName = playerName
+		this.socket.emit('game:turn:spectator', payload)
+	}
+
+	toggleSound () {
+		if (this.state.soundEnabled) {
+			this.disableSound()
+		} else {
+			this.enableSound()
+		}
+	}
+
+	enableSound () {
+		this.playSound(reactionSound, 'moveAudio', true)
+		this.setState({ soundEnabled: true })
+	}
+
+	disableSound () {
+		this.setState({ soundEnabled: false })
+		;['moveAudio', 'victoryAudio', 'defeatAudio'].forEach(function(key) {
+			if (this[key]) {
+				try {
+					this[key].pause()
+					this[key].currentTime = 0
+				} catch (e) {}
+			}
+		}.bind(this))
+	}
+
+	playSound (src, cacheKey, force) {
+		if (!force && !this.state.soundEnabled) return
+		if (!src) return
+		try {
+			var audio = cacheKey ? (this[cacheKey] || new Audio(src)) : new Audio(src)
+			if (cacheKey) this[cacheKey] = audio
+			audio.currentTime = 0
+			audio.play()
+		} catch (e) {}
+	}
+
+	playMoveSound () {
+		this.playSound(reactionSound, 'moveAudio')
+	}
+
+	playVictorySound () {
+		this.playSound(victorySound, 'victoryAudio')
+	}
+
+	playDefeatSound () {
+		this.playSound(defeatSound, 'defeatAudio')
+	}
+
+	playReactionSound (type) {
+		if (!this.state.soundEnabled) return
+		var normalized = normalizeReactionType(type)
+		var soundMap = {
+			laugh: hahaSound,
+			love: loveSound,
+			whisper: whisperSound,
+			lightning: lighteningSound
+		}
+		var src = soundMap[normalized] || reactionSound
+		this.playSound(src)
+	}
+
+	onSpectatorDisturb (data) {
+		var reactionType = normalizeReactionType(data.type)
+		var baseEmoji = getReactionEmoji(reactionType)
+		var name = data.from || 'Spectator'
+		this.playReactionSound(reactionType)
+
+		var particles = []
+		for (var i = 0; i < 10; i++) {
+			particles.push({
+				id: Date.now() + Math.random(),
+				type: reactionType || 'reaction',
+				from: name,
+				emoji: baseEmoji,
+				offset: Math.max(5, Math.min(90, Math.round(Math.random() * 100))),
+				delay: i * 40,
+				rise: 40 + Math.random() * 40
+			})
+		}
+
+		this.setState(function(prev) {
+			var nextList = (prev.spectatorReactions || []).concat(particles)
+			if (nextList.length > 40) nextList = nextList.slice(nextList.length - 40)
+			return { spectatorReactions: nextList }
+		})
+
+		particles.forEach(function(p) {
+			this.reactionTimeouts[p.id] = setTimeout(function() {
+				this.setState(function(prev) {
+					return { spectatorReactions: (prev.spectatorReactions || []).filter(function(r) { return r.id !== p.id }) }
+				})
+				delete this.reactionTimeouts[p.id]
+			}.bind(this), 2600 + p.delay)
+		}.bind(this))
 	}
 
 

@@ -3,6 +3,7 @@ var express = require('express');
 var app = express();
 var server = require('http').createServer(app);
 io = require('socket.io')(server);
+var GameStore = require('./GameStore');
 
 util = require("util");							// Utility resources (logging, object inspection, etc)
 
@@ -12,6 +13,13 @@ util = require("util");							// Utility resources (logging, object inspection, 
 Player = require("./Player").Player;			// Player class
 players = [];									// Array of connected players
 players_avail = [];
+
+/**************************************************
+** SPECTATOR SYSTEM
+**************************************************/
+var SpectatorModule = require("./SpectatorManager");
+spectatorManager = new SpectatorModule.SpectatorManager();
+GameStore.clearAllRooms();
 
 
 var port = process.env.PORT || 3001;

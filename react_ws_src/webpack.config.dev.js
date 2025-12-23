@@ -28,6 +28,10 @@ module.exports = {
 				loader: 'file?name=[path][name].[ext]&context=./static',
 			},
 			{
+				test: /\.(mp3|wav|ogg)$/,
+				loader: 'file?name=[path][name].[ext]&context=./static',
+			},
+			{
 				test: /\.jsx?/,
 				loaders: ['babel'],
 				include: path.join(__dirname, 'src')

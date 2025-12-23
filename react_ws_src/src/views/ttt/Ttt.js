@@ -1,50 +1,66 @@
-import React, { Component} from 'react'
-import { Link } from 'react-router'
+import React, { Component } from 'react'
 
 import SetName from './SetName'
 import SetGameType from './SetGameType'
-
 import GameMain from './GameMain'
+import GameLobby from './GameLobby'
+import SpectatorView from './SpectatorView'
 
 export default class Ttt extends Component {
 
-	constructor (props) {
+	constructor(props) {
 		super(props)
 
 		this.state = {
-			game_step: this.set_game_step()
+			mode: 'lobby',
+			game_type: null,
+			spectate_room: null
 		}
 	}
 
 //	------------------------	------------------------	------------------------
 
-	render () {
-
-		const {game_step} = this.state
-
-		console.log(game_step)
+	render() {
+		var mode = this.state.mode
+		var hasName = app.settings.curr_user && app.settings.curr_user.name
 
 		return (
-			<section id='TTT_game'>
-				<div id='page-container'>
-					{game_step == 'set_name' && <SetName 
-														onSetName={this.saveUserName.bind(this)} 
-												/>}
+			<section id="TTT_game">
+				<div id="page-container">
+					{mode === 'lobby' && (
+						<GameLobby 
+							onSelectPlay={this.handleSelectPlay.bind(this)} 
+							onSelectSpectate={this.handleSelectSpectate.bind(this)}
+						/>
+					)}
 
-					{game_step != 'set_name' && 
-						<div>
+					{mode === 'set_name' && (
+						<SetName onSetName={this.handleSetName.bind(this)} />
+					)}
+
+					{mode === 'set_game_type' && hasName && (
+						<div className="ttt-flow">
 							<h2>Welcome, {app.settings.curr_user.name}</h2>
+							<SetGameType onSetType={this.handleSetGameType.bind(this)} />
 						</div>
-					}
+					)}
 
-					{game_step == 'set_game_type' && <SetGameType 
-														onSetType={this.saveGameType.bind(this)} 
-													/>}
-					{game_step == 'start_game' && <GameMain 
-														game_type={this.state.game_type}
-														onEndGame={this.gameEnd.bind(this)} 
-													/>}
+					{mode === 'playing' && hasName && (
+						<div className="ttt-flow">
+							<h2>Welcome, {app.settings.curr_user.name}</h2>
+							<GameMain
+								game_type={this.state.game_type}
+								onEndGame={this.handleEndGame.bind(this)}
+							/>
+						</div>
+					)}
 
+					{mode === 'spectating' && this.state.spectate_room && (
+						<SpectatorView 
+							room={this.state.spectate_room}
+							onLeave={this.handleLeaveSpectate.bind(this)}
+						/>
+					)}
 				</div>
 			</section>
 		)
@@ -52,49 +68,44 @@ export default class Ttt extends Component {
 
 //	------------------------	------------------------	------------------------
 
-	saveUserName (n) {
-		app.settings.curr_user = {}
-		app.settings.curr_user.name = n
-
-		this.upd_game_step()
+	handleSelectPlay() {
+		var hasName = app.settings.curr_user && app.settings.curr_user.name
+		if (hasName) {
+			this.setState({ mode: 'set_game_type' })
+		} else {
+			this.setState({ mode: 'set_name' })
+		}
 	}
 
 //	------------------------	------------------------	------------------------
 
-	saveGameType (t) {
-		this.state.game_type = t
-
-		this.upd_game_step()
+	handleSetName(name) {
+		app.settings.curr_user = { name: name }
+		this.setState({ mode: 'set_game_type' })
 	}
 
 //	------------------------	------------------------	------------------------
 
-	gameEnd (t) {
-		this.state.game_type = null
-
-		this.upd_game_step()
-	}
-
-//	------------------------	------------------------	------------------------
-//	------------------------	------------------------	------------------------
-
-	upd_game_step () {
-
-		this.setState({
-			game_step: this.set_game_step()
-		})
+	handleSetGameType(type) {
+		this.setState({ mode: 'playing', game_type: type })
 	}
 
 //	------------------------	------------------------	------------------------
 
-	set_game_step () {
+	handleEndGame() {
+		this.setState({ mode: 'lobby', game_type: null })
+	}
 
-		if (!app.settings.curr_user || !app.settings.curr_user.name)
-			return 'set_name'
-		else if (!this.state.game_type)
-			return 'set_game_type'
-		else
-			return 'start_game'
+//	------------------------	------------------------	------------------------
+
+	handleSelectSpectate(room) {
+		var name = window.prompt('Enter your name (optional):', app.settings.curr_user ? app.settings.curr_user.name : '') || ''
+		app.settings.curr_user = { name: name.trim() || 'Anonymous' }
+		this.setState({ mode: 'spectating', spectate_room: room })
+	}
+
+	handleLeaveSpectate() {
+		this.setState({ mode: 'lobby', spectate_room: null })
 	}
 
 }
@@ -106,5 +117,5 @@ Ttt.propTypes = {
 }
 
 Ttt.contextTypes = {
-  router: React.PropTypes.object.isRequired
+	router: React.PropTypes.object.isRequired
 }
